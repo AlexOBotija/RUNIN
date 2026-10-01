@@ -1,0 +1,7 @@
+# Extra tools for development only (notebooks and their charts).
+# The deployed app does not need these, so they are kept out of requirements.txt.
+# Install with: pip install -r requirements-dev.txt
+-r requirements.txt
+
+jupyter==1.1.1
+matplotlib==3.11.2
