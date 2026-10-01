@@ -1,0 +1,16 @@
+# Data
+pandas==3.0.6
+pyarrow==25.0.1
+
+# AI agents
+langgraph==1.2.12
+langchain==1.4.3
+langchain-google-genai==4.4.0
+
+# App and charts
+streamlit==1.64.0
+plotly==7.1.0
+
+# Settings and testing
+python-dotenv==1.2.4
+pytest==9.1.1

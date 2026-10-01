@@ -1,0 +1,35 @@
+# Virtual environment
+.venv/
+venv/
+
+# Secrets (never commit these)
+.env
+.streamlit/secrets.toml
+
+# Data files (downloaded or generated, too big for Git)
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+*.parquet
+*.csv
+
+# Python caches and build files
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Editors and OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# Personal step prompts (kept local, not part of the project)
+prompts/
