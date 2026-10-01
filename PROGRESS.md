@@ -85,4 +85,32 @@ The full 2019 file needs about 1.3 GB of RAM and about 3 minutes to process. Fre
 - The data files are git-ignored; anyone who clones the repo rebuilds them with the two commands above.
 - For Step 2: in `pace`, a lower number means faster. Reuse `summarize_athletes()`, `LEVEL_EDGES` and `LEVEL_LABELS` instead of writing the weekly logic again.
 
-## Next: Step 2 — Analysis functions
+## Step 2 — Analysis functions ✅
+
+### What was done
+- `src/running_coach/data/loaders.py`: `load_sample()`, `load_reference()` and `get_athlete_runs(athlete_id)`. A missing file gives a clear error ("Run: python -m running_coach.data.prepare"); an unknown athlete gives a `ValueError`. Runs come back sorted by date with the columns `date, distance_km, duration_min, pace_min_km` (units in the names). The Strava data in Step 6 will be converted to the same 4 columns.
+- `src/running_coach/analysis/metrics.py`: 6 functions (`weekly_volume`, `pace_trend`, `consistency`, `load_ramp`, `longest_run`, `compare_to_peers`) plus `format_pace()` (5.5 → "5:30").
+- `tests/test_metrics.py`: 36 tests on tiny hand-made tables (45 tests in total with Step 1), with at least one edge case per function, the exact limits of the load-ratio labels, and a `json.dumps()` check for every function.
+- Checked on 3 sample athletes (13, 30974 with 365 runs, 22771 with only 54 days of history) and on a hand-made 1-run table: nothing crashes, every output passes `json.dumps()` and is under 1,000 characters.
+
+### Output format (same for every function)
+- `"status"`: `"ok"` or `"not_enough_data"`. When there isn't enough data, the dictionary has only `status` and a short `note`; it never raises an error.
+- Plain Python numbers, rounded (km 1 decimal, pace 2 decimals), dates as `"YYYY-MM-DD"`, pace also as `"m:ss"` text.
+- A short `"note"` that explains the numbers to the reader (the AI in Step 3).
+- No DataFrames and no raw runs: the agents get small summaries, never raw data.
+
+### Decisions taken
+- **"The last N weeks" = N blocks of 7 days ending on `end_date`.** By default `end_date` is the runner's **last run date**: the dataset is from 2019, so ending today would give empty weeks for everyone. Every week has 7 full days, so "last week vs the week before" is a fair comparison (Mon–Sun weeks would often make the last week look short). Every week-based function takes an optional `end_date` (e.g. today, for Strava data). Weeks before the first run are not counted; the output gives `weeks_analysed`.
+- **`weekly_volume`**: km per week (rest weeks = 0) and % change between the last two weeks. `change_pct` is `null` when the previous week had 0 km. Needs 2 weeks of history.
+- **`pace_trend`**: weekly pace = total minutes / total km. A straight line (linear trend, `numpy.polyfit`) through the weekly paces; weeks without runs are skipped but keep their position in time. Slope in seconds per km per week: **below −2 = improving, above +2 = getting worse, otherwise stable** (lower pace = faster). Needs 3 weeks with runs.
+- **`consistency`**: runs per week, average and weeks with zero runs. A window with zero runs is a valid answer ("ok" with zeros), not "not enough data".
+- **`load_ramp`**: acute = km in the last 7 days; chronic = km in the last 28 days / 4. **Ratio < 0.8 low, 0.8–1.3 normal, > 1.3 high risk** (limits included in "normal"; the rounded ratio is labelled, so label and number always match). A guideline from sports science (Gabbett 2016), not a medical rule. Needs 28 days of history.
+- **`longest_run`**: longest run in the window and its % of the 7-day week that contains it. In the public dataset a "run" is one day.
+- **`compare_to_peers`**: uses **all** the runner's runs and `summarize_athletes()` from Step 1 — the same method that built the reference table — so we compare like with like. Position: below p25 / between p25 and p75 (inclusive) / above p75, plus plain words; for pace "below p25" = **faster** than most. Needs 14 days between first and last run.
+
+### Things to remember
+- Weekly pace is noisy (athlete 30974 goes from 4:35 to 5:36 between weeks), so the trend label is a hint. The note says so, and the Coach should not overstate it.
+- The ratio label "high risk" is a guideline. The Coach must phrase it as "you increased quickly", never as a medical warning.
+- `get_athlete_runs` reads the sample file on every call. That's fine now; in Step 5 Streamlit will cache it.
+
+## Next: Step 3 — First single agent
