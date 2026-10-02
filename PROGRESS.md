@@ -188,4 +188,80 @@ Two of the three fixes were text (a docstring and the prompt), not logic: with a
 - On Windows, if `ask.py` output is redirected to a file or pipe and fails on special characters, set `$env:PYTHONUTF8=1`.
 - For Step 4: reuse `ALL_TOOLS`, `call_with_retry` and the `runs`-in-state pattern; only the Data agent gets the tools. `ask.py` counts LLM calls by counting `AIMessage`s.
 
-## Next: Step 4 — Multi-agent system
+## Step 4 — Multi-agent system ✅
+
+### What was done
+- `src/running_coach/agents/crew.py`: the crew. `CrewState` (the shared state), `SupervisorPlan`, `make_plan()`, `choose_next()` (the router), `build_crew()` (the graph with the 4 agents and their prompts) and `ask(question, runs)`, which returns the final state.
+- `scripts/ask.py`: uses the crew by default and prints the steps taken, the LLM calls, the time and the answer. `--single` runs the Step 3 agent; `--verbose` also prints the tool results and the analyst's notes.
+- `scripts/compare.py`: asks the 5 Step 3 questions to both versions and prints the answers plus a summary table (calls, seconds, words, `Next week:` lines). It waits 20 s between questions to stay under 15 requests per minute.
+- `single_agent.py`: new `count_llm_calls()`, used by both scripts.
+- `docs/single_vs_multi.md`: the comparison (results table, answer quality, prompt fixes, limitations, when to use each approach).
+- `tests/test_crew.py` (13 tests, 82 in total, none of them call the API):
+  - routing, plain Python: the plan for simple, complex and no-data questions; the router follows the plan in order; a simple question goes from data straight to coach; the analyst is skipped when there are no usable numbers; **when the step count reaches `MAX_STEPS`, the router goes to `END`**.
+  - the whole graph with a fake model: simple question = 3 LLM calls without the analyst; complex question = 4 calls; shoes = coach only, 2 calls; **only the data agent has the analysis tools** (the fake records which tools were bound for each LLM call); a bad tool argument becomes an `"error"` result, and the analyst is skipped.
+
+### The graph
+```mermaid
+flowchart TD
+    Q([Question + runner's runs]) --> SUP{Supervisor}
+    SUP -->|needs numbers| DATA[Data agent<br/>the only agent with tools]
+    DATA -.calls.-> TOOLS[(6 analysis tools)]
+    DATA -->|tool results| SUP
+    SUP -->|needs interpretation| AN[Analyst agent]
+    AN -->|analyst notes| SUP
+    SUP -->|ready to answer| COACH[Coach agent]
+    COACH -->|final answer| SUP
+    SUP -->|done, or max steps reached| A([Answer + steps taken])
+```
+(Checked in mermaid.live: it renders. Ready to reuse in the README.)
+
+- **Supervisor (hybrid):** on its first visit, **1 LLM call** with `with_structured_output(SupervisorPlan)` returns `needs_data`, `needs_analysis` and `reason`. `make_plan()` (Python) turns that into an ordered list: `["coach"]`, `["data", "coach"]` or `["data", "analyst", "coach"]`. On every visit, `choose_next()` (Python, no LLM) picks the first agent in the plan that hasn't run yet. The supervisor writes it into `next_agent`, and the conditional edge follows it.
+- **Data agent:** 1 LLM call with `bind_tools(ALL_TOOLS)`; Gemini chooses all the tools in one reply. **Python then runs them** with `runs` from the state (`run_tool()`), and the results go into `tool_results` as `{"weekly_volume(weeks=4)": {...}}`. There is no second "summary" call: that is the analyst's job.
+- **Analyst:** the plain model with no tools. It gets the question and the tool results (JSON) and writes at most 5 bullet notes for the coach.
+- **Coach:** the plain model with no tools. It gets the question, the tool results and the notes, and writes the answer: under 130 words, ending with exactly one `Next week:` line.
+- Every agent goes back to the supervisor (hub and spoke).
+
+### The shared state (`CrewState`)
+`question`, `runs` (DataFrame, read only by the tools), `plan`, `tool_results`, `analyst_notes`, `final_answer`, `next_agent`, `step_count`, plus 3 fields with an `operator.add` **reducer** (a node returns only its new items, and LangGraph adds them): `steps` (text for the app), `agents_done`, `llm_calls`.
+
+### Decisions taken
+- **Hybrid supervisor:** the LLM makes the one decision that needs language understanding (what kind of question is this?), and Python makes the bookkeeping decisions (who is next, when to stop). This saves 2–3 calls per question compared with an LLM call after every agent, and Python guarantees a valid order (the analyst never runs before the data agent).
+- **Skip the analyst when there are no usable numbers** (no tool called, or no result with status `"ok"`). It's a Python rule, so it saves a call.
+- **Only the data agent has tools.** The analyst and coach can only use numbers the tools really calculated, and each role has one clear job. The test proves it from behaviour, not by reading the code.
+- **The runs stay in the state** (not an athlete id), same as Step 3, so the Strava data in Step 6 needs no change.
+- **The coach always ends with `Next week: ...`.** That makes "exactly one suggestion" checkable by code, and the app can highlight it.
+- **`call_with_retry` around every LLM call** (supervisor, data, analyst, coach).
+
+### Max steps
+- **`MAX_STEPS = 6`**: the supervisor can send work to an agent at most 6 times. The longest normal path needs 3 (data, analyst, coach), so the limit is double. When `step_count` reaches 6, `choose_next()` returns `END`, and the steps list says so.
+- With Python routing a loop shouldn't happen, but the guard protects the free-tier quota if the routing changes later (for example, an LLM deciding every step).
+- Second safety net: LangGraph's `recursion_limit = 2 * MAX_STEPS + 2 = 14` node runs. Our own check always stops first.
+
+### LLM calls per question
+| Question type | Path | LLM calls |
+|---|---|---|
+| Simple fact ("How much did I run?") | supervisor → data → coach | **3** |
+| Needs interpretation ("Am I improving?") | supervisor → data → analyst → coach | **4** |
+| No data needed ("What shoes?") | supervisor → coach | **2** |
+
+Single agent for comparison: 2 (1 without tools). On the free tier (500 per day) that's about 150 crew questions per day. This step used about **96 LLM calls** (3 comparison runs, 2 pain-question runs and some spot checks).
+
+### Main findings of the comparison (`docs/single_vs_multi.md`)
+- **Crew: 3.4 calls and 4.0 s on average; single agent: 1.8 calls and 2.5 s.** About 1.9× the calls but only 1.6× the time (the analyst's and coach's calls are short).
+- **Accuracy is the same:** every number in every answer comes from a tool result, in both versions.
+- **The crew is more consistent:** short answers (53–75 words), always exactly one `Next week:` line, visible steps, and the pain rule in one place. Pain question: the crew recommended a doctor or physiotherapist and extra rest, not more distance.
+- **The single agent gives more detail** (all weekly values) and has fewer hand-overs where meaning can get lost.
+- **Choice for the app: the crew.**
+
+### Prompt fixes found with real questions
+1. The coach dropped the pace "hint, not proof" caveat and used jargon (a slope) → the analyst reports the limits of the numbers; the coach explains technical values in plain words.
+2. The shoe question's tip wasn't about shoes → the tip must be about the topic of the question.
+3. "Base it on their numbers" made the coach invent targets ("95 km", "6.89 runs per week") → say the suggestion in words, compared with current training.
+4. The coach copied rule text to the runner ("...and don't suggest running more") → the rule separates "what to tell the runner" from "what you must not do".
+
+### Things to remember
+- **Known limitations** (in the doc): the coach often copies the prompt's example suggestion ("keep the same weekly distance"); it once added the pace caveat to a peer comparison; small rounding (19.1 → 19). Possible fix: several different examples in rule 9, and "only when a tool note says so" in rule 8.
+- The Google library prints a warning once per run ("Direct use of automatic function calling (AFC)…"). It's harmless; it comes from the library, not our code.
+- For Step 5: call `crew.ask(question, runs)` and show `result["final_answer"]`, `result["steps"]` and optionally `tool_results` / `analyst_notes`. Cache the loaded data and the built crew (`build_crew()` once), not the answers. One question takes about 3–5 s, so show a spinner.
+
+## Next: Step 5 — Streamlit app

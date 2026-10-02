@@ -13,7 +13,7 @@ from typing import Literal
 
 import pandas as pd
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
@@ -100,3 +100,8 @@ def ask(
         config={"recursion_limit": MAX_STEPS},
     )
     return result["messages"]
+
+
+def count_llm_calls(messages: list[BaseMessage]) -> int:
+    """Each LLM reply is one AIMessage, so counting them counts the LLM calls."""
+    return sum(isinstance(message, AIMessage) for message in messages)
