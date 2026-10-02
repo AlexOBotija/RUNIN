@@ -41,8 +41,10 @@ def _apply_base_layout(fig: go.Figure, title: str, subtitle: str = "") -> go.Fig
         showlegend=False,  # one data series per chart: the title and labels name it
         hoverlabel={"bgcolor": "white", "font": {"color": TEXT_COLOR}},
     )
-    fig.update_xaxes(showgrid=False, linecolor=GRID_COLOR, tickformat="%d %b")
-    fig.update_yaxes(gridcolor=GRID_COLOR, zeroline=False)
+    # automargin: grow the small margins above so the tick labels and axis titles fit.
+    # It is off by default, and then the labels are drawn outside the chart and cut off.
+    fig.update_xaxes(showgrid=False, linecolor=GRID_COLOR, tickformat="%d %b", automargin=True)
+    fig.update_yaxes(gridcolor=GRID_COLOR, zeroline=False, automargin=True)
     return fig
 
 
