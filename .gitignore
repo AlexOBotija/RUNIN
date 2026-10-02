@@ -25,9 +25,10 @@ dist/
 # Jupyter
 .ipynb_checkpoints/
 
-# Editors and OS
+# Editors, AI tools and OS
 .vscode/
 .idea/
+.claude/
 Thumbs.db
 .DS_Store
 

@@ -24,6 +24,13 @@ FIRST_WAIT_SECONDS = 10  # then 20 s: the wait doubles after each failed try
 T = TypeVar("T")
 
 
+class RateLimitReached(RuntimeError):
+    """Gemini still says "rate limit" after every retry. The app shows a friendly message.
+
+    It is a RuntimeError, so code that catches RuntimeError (like scripts/ask.py) still works.
+    """
+
+
 def _get_setting(name: str) -> str:
     """Return the value of an environment variable, or raise a clear error if it is missing."""
     value = os.getenv(name, "").strip()
@@ -60,7 +67,7 @@ def call_with_retry(
             return func()
         except ModelRateLimitError as error:
             if attempt == max_tries:
-                raise RuntimeError(
+                raise RateLimitReached(
                     f"Gemini rate limit: still blocked after {max_tries} tries. "
                     "Per-minute limit: wait a minute and ask again. "
                     "Daily limit: try again tomorrow."

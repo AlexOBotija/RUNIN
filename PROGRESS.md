@@ -264,4 +264,74 @@ Single agent for comparison: 2 (1 without tools). On the free tier (500 per day)
 - The Google library prints a warning once per run ("Direct use of automatic function calling (AFC)…"). It's harmless; it comes from the library, not our code.
 - For Step 5: call `crew.ask(question, runs)` and show `result["final_answer"]`, `result["steps"]` and optionally `tool_results` / `analyst_notes`. Cache the loaded data and the built crew (`build_crew()` once), not the answers. One question takes about 3–5 s, so show a spinner.
 
-## Next: Step 5 — Streamlit app
+## Step 5 — Streamlit app ✅
+
+### What was done
+- `app/streamlit_app.py` (`streamlit run app/streamlit_app.py`):
+  - **Sidebar:** data source ("Sample runner" or "Upload Strava export"); a dropdown of the 1,000 sample IDs plus a "🎲 Random runner" button; a "Weeks in the charts" slider (4–52, default 12); for uploads, a "What we assumed about your file" expander.
+  - **Top:** 4 key numbers (km this week with % change, runs this week, average pace, level) and 2 Plotly charts (weekly km with the peer band, weekly pace).
+  - **Bottom:** chat with the crew, 3 example question buttons, the answer with the `Next week:` line highlighted, and a "How the agents worked" expander (the steps, AI calls and seconds, the tool numbers and the analyst's notes).
+- `src/running_coach/charts.py`: `weekly_distance_chart(volume, peers)` and `pace_chart(trend)`. They only take analysis-function results, never LLM output.
+- `src/running_coach/data/strava.py`: `load_strava_csv(file)` returns `(runs, notes)`: the runs in our 4 columns and a list of plain-English assumptions. Any unusable file raises `StravaFormatError` (a `ValueError`) with a clear message.
+- `src/running_coach/llm.py`: new `RateLimitReached(RuntimeError)`, raised by `call_with_retry` after the last try, so the app can recognise "API limit reached" without reading the error text. `scripts/ask.py` still works because it is a `RuntimeError`.
+- `.streamlit/config.toml`: the theme (committed; `secrets.toml` stays git-ignored).
+- `.gitignore`: added `.claude/` (local config of the Claude Code preview pane, not part of the project).
+- New tests (97 in total, none of them call the API):
+  - `tests/test_strava.py` (10): tiny fake CSVs written in the test. Metres and km give the same `distance_km`; non-runs are removed; wrong columns, a non-CSV file and a rides-only file give a clear `StravaFormatError`; same-day runs are added; elapsed time is used when moving time is missing; both regional date formats; the cleaning rules.
+  - `tests/test_app.py` (5, `streamlit.testing.v1.AppTest`): the page loads with sample runner 30974 and the key numbers equal the analysis results, **without building the crew**; an example button asks the (fake) crew and shows "How the agents worked"; a new runner clears the chat; a rate limit shows the friendly message; a wrong upload shows the friendly message and stops the page.
+
+### How Streamlit works (the 3 ideas used)
+- **The script reruns from top to bottom** on every click or message. Normal variables are forgotten each time.
+- **`st.session_state`** keeps values between reruns: the chosen runner (`athlete_id`, connected to the dropdown with `key=`), the chat history (`messages`) and which runner the chat belongs to (`chat_runner`).
+- **Caching:** `@st.cache_data` for data (reference table, athlete list, one runner's runs, an uploaded file keyed by its bytes) returns a saved copy. `@st.cache_resource` for the crew graph returns the same shared object. Answers are never cached.
+
+### Decisions taken
+- **"This week" = the 7 days ending on the runner's last run**, the same rule as the tools, so the numbers on the page match the chat answers. The caption says which date the data ends on.
+- **The crew is built on the first question, not when the page opens.** The charts work without an API key, and the app test proves that opening the page makes no LLM call.
+- **Each question is independent.** The chat history is only shown on the page; the crew has no memory of earlier questions. A new runner or a new file starts a new chat (old answers were about someone else).
+- **Example buttons** in a horizontal container (`st.container(horizontal=True)`): each button is as wide as its text and wraps on small screens. Equal columns cut "Am I increasing my distance too fast?" off.
+- **Random button with a callback** (`on_click`): it runs before the rerun, so the dropdown already shows the new runner.
+- **Friendly errors, never a red traceback:** API limit (`RateLimitReached`), API key missing (`RuntimeError`), too many steps (`GraphRecursionError`), anything else (generic message; details printed in the terminal). Wrong file (`StravaFormatError`) and missing data files have their own messages. Not enough data → "–" in the key numbers and an info box with the tool's note instead of a chart.
+
+### Strava export: columns and assumptions
+Checked in other projects that read `activities.csv` (Athlytics source code, Daniel Roelfs' blog post):
+
+| Column | What we found | What we do |
+|---|---|---|
+| `Activity Type` | Run, Ride, Walk, … | keep `Run`, `Trail Run`, `Virtual Run` (case and spaces ignored) |
+| `Distance` (appears **twice**) | pandas renames the second to `Distance.1`; it is in **metres** | use `Distance.1` / 1000. With only one `Distance` column: median above 100 → metres, otherwise km. Miles not supported. |
+| `Moving Time` | seconds, without stops | the duration (matches Strava's pace). Empty or 0 → `Elapsed Time` for that run. |
+| `Elapsed Time` (appears twice) | seconds, with stops | fallback only |
+| `Activity Date` | `Feb 17, 2022, 12:18:26 PM` or `19 Feb 2022, 10:14:12` (depends on region) | `pd.to_datetime(format="mixed")` |
+
+- Same-day runs are **added together** (one row per day, like the public dataset), so "runs per week" and the level compare fairly with the reference table.
+- The **same cleaning rules as Step 1** (`clean_runs()` is reused): 0.5–100 km, pace 2:30–15:00 min/km.
+- The export must be in **English** (otherwise the column names differ and the user gets the "missing columns" message).
+- **Not confirmed yet (check with the real file in Step 6):** the time zone of `Activity Date` (probably UTC, so a run near midnight can land on the wrong day) and the unit of the *first* `Distance` column (we avoid it when the metres column exists).
+
+### Design choices
+- **Palette:** pastel backgrounds with deeper data colours of the same family, all checked with a colour validator (contrast at least 3:1 on the page background, readable with colour blindness).
+  - Page `#FBFAF7` (warm off-white), sidebar `#EEF5F1` (pale sage), text `#2B2D42` (dark blue-gray), buttons/slider `#2F9670`.
+  - Weekly km bars `#2F9670` (deep sage), pace line `#C8693F` (terracotta), peer band `#D9D3F0` (pastel lavender).
+  - The first idea (pastel bars and lines, `#8FBFA8` / `#F4A988`) failed the check: only about 2:1 contrast, too pale to read.
+- **Layout:** wide page; title and short caption; runner name and "data ends on …" caption; 4 key numbers in a row; 2 charts side by side (they stack on a phone); a thin divider; the chat. No boxes around sections.
+- **Charts:** one data series per chart, so no legend: the subtitle explains the band ("Band: typical for 60+ km runners (65–85 km)"). Pace axis reversed (up = faster) with "m:ss" tick labels. Plotly toolbar hidden; `theme=None` keeps our colours.
+- Always light (`base = "light"`), even when the visitor's computer uses dark mode.
+
+### Final checks (all passed)
+- `pytest -v`: 97 passed.
+- `streamlit run app/streamlit_app.py --server.headless true` → `http://localhost:8501/_stcore/health` returned `ok`.
+- Real question through the app ("Am I increasing my distance too fast?", runner 30974): an answer (96.7 km in the last 7 days vs 94.6 km usual, normal load) + "How the agents worked" (data → analyst → coach, `load_ramp()` and `weekly_volume(weeks=8)`, 4 AI calls, 5.3 s). Every number comes from a tool result.
+- `git status`: no data files, no `.env`, no `secrets.toml`; no `AIza` key text in any file Git can see.
+- This step used **8 LLM calls** (2 real questions).
+
+### Things to remember
+- Run the app: `streamlit run app/streamlit_app.py` (venv active, from the project root). Stop with `Ctrl+C`.
+- On Windows, scripts that print emojis (🎲, 👟) to a redirected terminal need `$env:PYTHONUTF8=1`.
+- For Step 6:
+  - Check `strava.py` with the real `activities.csv`: time zone, the units, and the number of runs/dates/km against what Strava shows.
+  - The analysis tools end "this week" on the last run. For live Strava data, "today" might be better (every week-based function already takes `end_date`, but the crew's tools don't pass it yet).
+  - The app reads `GOOGLE_API_KEY` through `get_chat_model()` (from `.env`). On Streamlit Cloud it must come from `st.secrets`.
+  - `sample.parquet` and `reference.parquet` are git-ignored, so the cloud won't have them yet.
+
+## Next: Step 6 — My Strava data + deployment

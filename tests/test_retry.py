@@ -44,7 +44,7 @@ def test_succeeds_on_the_third_try_after_waiting_longer_each_time(waits):
 
 def test_gives_up_after_the_maximum_tries(waits):
     fake = FakeGemini(failures=99)
-    with pytest.raises(RuntimeError, match="still blocked after 3 tries"):
+    with pytest.raises(llm.RateLimitReached, match="still blocked after 3 tries"):
         llm.call_with_retry(fake, max_tries=3)
     assert fake.calls == 3
     assert len(waits) == 2  # no wait after the last try

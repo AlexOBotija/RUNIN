@@ -1,0 +1,18 @@
+# Streamlit settings for the Running Coach app. This file is safe to commit:
+# it has no secrets. API keys go in .env (local) or secrets.toml (never committed).
+
+[theme]
+# Always light, even if the visitor's computer uses dark mode.
+base = "light"
+# Buttons, slider, links and the chat icon. A deep sage green (pastel family, but dark
+# enough to read on the light background).
+primaryColor = "#2F9670"
+# Warm off-white page, pale sage sidebar, dark blue-gray text.
+backgroundColor = "#FBFAF7"
+secondaryBackgroundColor = "#EEF5F1"
+textColor = "#2B2D42"
+font = "sans-serif"
+
+[client]
+# Hide the developer menu items that visitors don't need.
+toolbarMode = "minimal"
