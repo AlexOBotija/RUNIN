@@ -381,7 +381,7 @@ Checked in other projects that read `activities.csv` (Athlytics source code, Dan
 ## Project finished ✅
 
 ### Left to do by hand
-- [ ] Write the "What I learned" section in README.md yourself.
+- [x] Write the "What I learned" section in README.md (done after Step 7, from a draft I reviewed).
 - [ ] GitHub repo → "About" (gear icon): paste the description, the website (the live link) and the topics.
 - [ ] After the push, open the live app and check that the chart numbers are no longer cut off (Streamlit Cloud redeploys automatically).
 - [ ] Add the project to your CV and LinkedIn, with the live link and the repo link.

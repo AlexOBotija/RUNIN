@@ -181,7 +181,15 @@ docs/single_vs_multi.md       single agent vs crew comparison
 
 ## What I learned
 
-*I will write this section myself.*
+This was my first project with AI agents. The main things I learned:
+
+- **Decide what the LLM does and what Python does.** At first I thought the agents would do everything. In the end, the LLM makes only the decisions that need language: what kind of question is this, which tools to call, how to explain the result. Python does the maths, the order of the agents and the limits. This made the app cheaper, faster and easier to test.
+- **LLMs are bad with numbers.** The coach once invented targets like "6.89 runs per week", and the model read 55.4 minutes as "55 minutes 4 seconds". The fix was to let the tools calculate everything, give durations as text, and write clear rules in the prompts.
+- **Measure before choosing.** I built a single agent first and then the crew, and compared them on the same questions. The crew used about twice the LLM calls, but its answers were more consistent. I chose it because of the numbers, not because "multi-agent" sounds better.
+- **Real data is messy.** My own Strava export showed problems the public dataset didn't have: dates in UTC, and two columns called "Distance" with different units.
+- **You can test an LLM app without calling the LLM.** Fake models with fixed replies let me test the routing, tools and app logic quickly and for free.
+
+If I started again, I would test with real data earlier, and I would write a small set of test questions with expected answers from the beginning.
 
 ## License
 
