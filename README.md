@@ -4,13 +4,11 @@ Ask questions about your running in plain English, and a small team of AI agents
 
 **Live app:** https://running-coach-crew.streamlit.app
 
-![The app: a sample runner's charts, then a question to the agents and the answer](docs/images/demo.gif)
+![Key numbers and charts for a sample runner](docs/images/dashboard.png)
 
 ## What it does
 
 You pick a runner from a public dataset, or upload your own Strava export. The app shows your weekly distance and pace next to runners at your level. Then you can ask questions like "Am I improving?" or "Am I increasing my distance too fast?". Four agents work together to answer: they calculate the numbers with Python, interpret them, and write a short answer with one suggestion for next week.
-
-![Key numbers and charts for a sample runner](docs/images/dashboard.png)
 
 ## Architecture
 

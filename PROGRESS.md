@@ -334,4 +334,64 @@ Checked in other projects that read `activities.csv` (Athlytics source code, Dan
   - The app reads `GOOGLE_API_KEY` through `get_chat_model()` (from `.env`). On Streamlit Cloud it must come from `st.secrets`.
   - `sample.parquet` and `reference.parquet` are git-ignored, so the cloud won't have them yet.
 
-## Next: Step 6 — My Strava data + deployment
+## Step 6 — My Strava data + deployment ✅
+
+(Short summary, written in Step 7 from the Step 6 commit and the code.)
+
+### What was done
+- **Real Strava data:** tested `strava.py` with my own `activities.csv` (4 days of running, 3 weight-training sessions removed). Fixes:
+  - `Activity Date` is in **UTC** (the file said 7:04 PM, Strava showed 8:04 PM in UTC+1). The app now converts it to the visitor's browser time zone (`st.context.timezone`), so a run near midnight counts on the right day.
+  - Distance: the second `Distance` column (metres) is used, as planned.
+- **Prompt and tool fixes found with real questions:** the analyst may not mention a label or tool that isn't in the results; `weekly_volume` gives no % change when the week before only partly counts (a new runner); `longest_run` gives the duration as text ("55:24") because the LLM once read 55.4 as "55 minutes 4 seconds".
+- **Gemini "busy" errors (HTTP 5xx)** are retried like rate limits (10 s, then 20 s), and the app shows a friendly message (`ModelBusy`).
+- **Question limits** to protect the free quota: 5 per visitor (`st.session_state`) and 60 per day for the whole app (`limits.py`, `DailyLimit`, shared by all visitors with `st.cache_resource`).
+- New tests: `test_limits.py`, `test_retry.py`, more Strava, metrics and app tests (113 in total).
+
+### Deployment choices
+- **Streamlit Community Cloud**, from the public GitHub repo, branch `main`, file `app/streamlit_app.py`, Python 3.12.
+- **Data files committed:** `sample.parquet` (shrunk from 1.74 MB to 0.64 MB: no pace column, zstd compression) and `reference.parquet` (7.5 KB). Exceptions in `.gitignore`.
+- **Secrets:** `GOOGLE_API_KEY` and `GEMINI_MODEL` only in the Streamlit secrets box (TOML). `use_cloud_secrets()` copies them into environment variables, so `llm.py` works the same locally (`.env`) and on the cloud.
+- `requirements.txt` ends with `-e .`, so the cloud installs our package too.
+- The deployment itself was finished at the start of Step 7 (the app list was empty after Step 6).
+- **Live link:** https://running-coach-crew.streamlit.app
+
+## Step 7 — README and presentation ✅
+
+### What was done
+- **Code review:** added 4 missing docstrings, updated 4 comments/messages that were out of date after Step 6 (`llm.py`, `loaders.py`, the missing-data message in the app, `ask.py`), and removed the `.gitkeep` files from folders that now have real files. No dead code, no unused imports, no debug prints.
+- **Chart bug fix:** the axis numbers and dates were cut off, because the charts use small margins and Plotly's `automargin` is off by default. `automargin=True` on both axes in `_apply_base_layout()`.
+- **README.md:** live link, 2 screenshots (`docs/images/`), what it does, architecture (Mermaid diagram + one paragraph per agent), data (citation, sample and reference table, Strava), tech stack, how to run locally (Windows and Mac/Linux), design decisions, limitations and future ideas, project structure, and a placeholder for "What I learned".
+- **LICENSE:** MIT, 2026, Alexandre Andrade.
+- **Deployed the app** on Streamlit Community Cloud and tested it: public, charts load, one question answered (4 AI calls), Strava upload works.
+
+### Decisions taken
+- **Screenshots only, no GIF.** Two screenshots show the charts and the agents. A GIF can be added later.
+- **Dataset citation:** the dataset ("A public dataset on long-distance running training in 2019 and 2020", BMClab) and the PeerJ paper that describes it ("A worldwide comparison of long-distance running training in 2019 and 2020...", PeerJ 10:e13192) have different titles, so the README cites both, plus the Figshare DOI.
+- **The README says the small data files are included,** so a new user can run the app straight after a clone. Rebuilding the data is an optional section.
+
+### Final checks
+- `pytest`: 113 passed.
+- **Fresh clone** in a temporary folder, following the README's Windows steps exactly (clone, `py -3.12 -m venv`, `Activate.ps1`, `pip install -r requirements.txt`, `Copy-Item .env.example .env`): install OK, the package loads from the clone, 113 tests pass, the app opens with charts, and a question without an API key shows the friendly "not set up yet" message. (The real API key was not copied into the test folder; the live app proved the key path works.)
+- **Links:** live app, dataset page, Figshare DOI, PeerJ DOI, AI Studio and the repo all open; `docs/single_vs_multi.md`, `LICENSE` and both images exist.
+- **Mermaid:** renders in mermaid.live (same block as in `docs/single_vs_multi.md`).
+- **No hype words, no emojis** in the README.
+- `git ls-files`: no `.env`, no `secrets.toml`, no `activities.csv`, no raw data, no file over 1 MB (largest: `sample.parquet`, 0.64 MB). `git grep AIza` finds only the sentence in this file.
+- `git log`: one or more clear commits per step.
+
+## Project finished ✅
+
+### Left to do by hand
+- [ ] Write the "What I learned" section in README.md yourself.
+- [ ] GitHub repo → "About" (gear icon): paste the description, the website (the live link) and the topics.
+- [ ] After the push, open the live app and check that the chart numbers are no longer cut off (Streamlit Cloud redeploys automatically).
+- [ ] Add the project to your CV and LinkedIn, with the live link and the repo link.
+- [ ] Practise the 2-minute explanation out loud.
+- [ ] Optional: record a short GIF (`docs/images/demo.gif`) and add it under the title.
+
+### Future ideas
+- Heart rate and elevation (Strava API or .fit files), to separate easy and hard runs.
+- More data sources: connect to Strava directly, or read Garmin exports.
+- Better peer groups: age group, gender and country are in the dataset.
+- Conversation memory, so follow-up questions work.
+- A small set of test questions with expected answers, to check the agents automatically after a prompt change.
+- Store the daily question counter in a database, so it survives restarts.
