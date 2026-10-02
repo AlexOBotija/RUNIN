@@ -6,6 +6,7 @@ are fast, free and always give the same result. The processed data files are nee
 so the tests are skipped if they don't exist yet.
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -16,7 +17,8 @@ from running_coach.agents import crew
 from running_coach.analysis.metrics import compare_to_peers, weekly_volume
 from running_coach.data.loaders import get_athlete_runs, load_reference
 from running_coach.data.prepare import REFERENCE_FILE, SAMPLE_FILE
-from running_coach.llm import RateLimitReached
+from running_coach.limits import DailyLimit
+from running_coach.llm import ModelBusy, RateLimitReached
 
 pytestmark = pytest.mark.skipif(
     not (SAMPLE_FILE.exists() and REFERENCE_FILE.exists()),
@@ -116,6 +118,51 @@ def test_rate_limit_shows_a_friendly_message(monkeypatch, fake_crew):
 
     assert not app.exception
     assert "free AI quota is used up" in app.warning[0].value
+
+
+def test_a_busy_ai_service_shows_a_friendly_message(monkeypatch, fake_crew):
+    def busy(question, runs, crew=None):
+        raise ModelBusy("503 (fake)")
+
+    monkeypatch.setattr(crew, "ask", busy)
+    app = click(start_app(), "Am I improving?")
+
+    assert not app.exception
+    assert "AI service is busy" in app.warning[0].value
+
+
+def test_the_sixth_question_shows_the_limit_message_and_does_not_call_the_crew(fake_crew):
+    app = start_app()
+    for _ in range(5):
+        app = click(app, "Am I improving?")
+    assert len(fake_crew) == 5
+    assert any("Questions left in this visit: 0 of 5" in c.value for c in app.caption)
+
+    app = click(app, "Am I improving?")
+
+    assert not app.exception
+    assert len(fake_crew) == 5  # the 6th question never reached the crew
+    assert "You have used your 5 questions" in app.warning[-1].value
+
+
+def test_the_daily_limit_for_the_whole_app_stops_the_question(monkeypatch, fake_crew):
+    monkeypatch.setattr(DailyLimit, "try_use", lambda self: False)  # today's limit reached
+    app = click(start_app(), "Am I improving?")
+
+    assert not app.exception
+    assert fake_crew == []
+    assert "answered all its questions for today" in app.warning[0].value
+
+
+def test_cloud_secrets_are_copied_into_the_environment(monkeypatch):
+    # setenv first, so pytest puts the old value back after the test.
+    monkeypatch.setenv("GEMINI_MODEL", "model-from-dotenv")
+    app = AppTest.from_file(str(APP_FILE), default_timeout=30)
+    app.secrets["GEMINI_MODEL"] = "model-from-cloud-secrets"
+    app.run()
+
+    assert not app.exception
+    assert os.environ["GEMINI_MODEL"] == "model-from-cloud-secrets"
 
 
 def test_a_wrong_upload_shows_a_friendly_message():

@@ -75,7 +75,9 @@ without runs. These are training observations, never medical ones.
 pace trend), say so
 
 Rules:
-- Use only numbers that appear in the tool results. Never calculate new numbers.
+- Use only numbers and labels that appear in the tool results. Never calculate new \
+numbers, and never mention a label (for example "high risk") or a tool that is not in \
+the results.
 - If a result is "not_enough_data", say so and give its note.
 - Pace is in minutes per km, and a lower pace is faster. Use the "m:ss" text.
 - A "high risk" load label means the runner increased their distance quickly. It is not \

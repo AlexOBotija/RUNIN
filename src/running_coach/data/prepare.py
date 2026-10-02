@@ -110,8 +110,11 @@ def build_sample(sample_size: int = 1000, seed: int = 42) -> pd.DataFrame:
     sample = runs[runs["athlete"].isin(chosen)]
     sample = sample.sort_values(["athlete", "datetime"]).reset_index(drop=True)
 
+    # The file is committed to Git so the cloud app has it, so we keep it small (under
+    # 1 MB): pace is not saved (load_sample() calculates it again with the same formula)
+    # and zstd compresses better than the default (snappy).
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
-    sample.to_parquet(SAMPLE_FILE, index=False)
+    sample.drop(columns="pace").to_parquet(SAMPLE_FILE, index=False, compression="zstd")
     return sample
 
 

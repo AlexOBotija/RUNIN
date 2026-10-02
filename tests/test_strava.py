@@ -121,3 +121,28 @@ Activity Date,Activity Type,Moving Time,Distance
     runs, notes = read(with_errors)  # 0.2 km is too short; 1:00 min/km is too fast
     assert len(runs) == 1
     assert any("Removed 2 day(s) outside the cleaning rules" in note for note in notes)
+
+
+# A run that starts at 11:30 PM UTC on 30 Sep is 00:30 on 1 Oct in London (UTC+1 then).
+NEAR_MIDNIGHT = """\
+Activity Date,Activity Type,Moving Time,Distance
+"Sep 30, 2026, 11:30:00 PM",Run,3000,10000.0
+"""
+
+
+def test_dates_are_converted_from_utc_to_the_runners_time_zone():
+    runs, notes = load_strava_csv(io.StringIO(NEAR_MIDNIGHT), timezone="Europe/London")
+    assert str(runs.loc[0, "date"].date()) == "2026-10-01"
+    assert any("Europe/London" in note for note in notes)
+
+
+def test_without_a_time_zone_the_date_stays_in_utc():
+    runs, notes = read(NEAR_MIDNIGHT)
+    assert str(runs.loc[0, "date"].date()) == "2026-09-30"
+    assert any("in UTC" in note for note in notes)
+
+
+def test_an_unknown_time_zone_falls_back_to_utc():
+    runs, notes = load_strava_csv(io.StringIO(NEAR_MIDNIGHT), timezone="Mars/Olympus")
+    assert str(runs.loc[0, "date"].date()) == "2026-09-30"
+    assert "Unknown time zone 'Mars/Olympus', so dates are kept in UTC." in notes

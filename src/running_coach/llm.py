@@ -5,8 +5,9 @@ Settings come from the .env file in the project root:
 - GEMINI_MODEL: the model name, for example "gemini-3.5-flash-lite".
 
 Free-tier limits (see PROGRESS.md): 15 requests per minute and 500 per day. When we go
-over a limit, Gemini answers with a rate-limit error (HTTP 429). call_with_retry()
-waits and tries again.
+over a limit, Gemini answers with a rate-limit error (HTTP 429). When Google's servers are
+too busy, it answers with a server error (HTTP 5xx, usually 503 "high demand"). Both are
+temporary, so call_with_retry() waits and tries again.
 """
 
 import os
@@ -15,6 +16,7 @@ from collections.abc import Callable
 from typing import TypeVar
 
 from dotenv import load_dotenv
+from google.genai.errors import ServerError
 from langchain_core.exceptions import ModelRateLimitError
 from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -29,6 +31,10 @@ class RateLimitReached(RuntimeError):
 
     It is a RuntimeError, so code that catches RuntimeError (like scripts/ask.py) still works.
     """
+
+
+class ModelBusy(RuntimeError):
+    """Gemini's servers are still busy (HTTP 5xx) after every retry. Not our quota's fault."""
 
 
 def _get_setting(name: str) -> str:
@@ -57,23 +63,30 @@ def call_with_retry(
     max_tries: int = MAX_TRIES,
     first_wait_seconds: float = FIRST_WAIT_SECONDS,
 ) -> T:
-    """Call func(). If Gemini says "rate limit", wait and try again (10 s, then 20 s).
+    """Call func(). If Gemini says "rate limit" or "busy", wait and try again (10 s, then 20 s).
 
-    Only rate-limit errors are retried. Other errors (a wrong API key, a bug in our
+    Only these temporary errors are retried. Other errors (a wrong API key, a bug in our
     code) would fail again in the same way, so they are raised at once.
     """
     for attempt in range(1, max_tries + 1):
         try:
             return func()
-        except ModelRateLimitError as error:
-            if attempt == max_tries:
+        except (ModelRateLimitError, ServerError) as error:
+            is_rate_limit = isinstance(error, ModelRateLimitError)
+            if attempt == max_tries and is_rate_limit:
                 raise RateLimitReached(
                     f"Gemini rate limit: still blocked after {max_tries} tries. "
                     "Per-minute limit: wait a minute and ask again. "
                     "Daily limit: try again tomorrow."
                 ) from error
+            if attempt == max_tries:
+                raise ModelBusy(
+                    f"Gemini is busy (server error): still failing after {max_tries} tries. "
+                    "Try again in a minute."
+                ) from error
             wait = first_wait_seconds * 2 ** (attempt - 1)
-            print(f"Rate limit hit (try {attempt} of {max_tries}). Waiting {wait:g} s...")
+            problem = "Rate limit hit" if is_rate_limit else "Gemini is busy"
+            print(f"{problem} (try {attempt} of {max_tries}). Waiting {wait:g} s...")
             time.sleep(wait)
     raise ValueError("max_tries must be at least 1")
 

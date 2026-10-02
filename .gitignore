@@ -13,6 +13,10 @@ data/processed/*
 !data/processed/.gitkeep
 *.parquet
 *.csv
+# Exceptions: the two small processed files the app needs on the cloud (under 1 MB).
+# They come after the rules above, so they win.
+!data/processed/sample.parquet
+!data/processed/reference.parquet
 
 # Python caches and build files
 __pycache__/

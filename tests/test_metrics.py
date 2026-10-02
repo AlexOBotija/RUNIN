@@ -13,6 +13,7 @@ import pytest
 from running_coach.analysis.metrics import (
     compare_to_peers,
     consistency,
+    format_duration,
     format_pace,
     load_ramp,
     longest_run,
@@ -50,7 +51,7 @@ def test_weekly_volume_counts_km_and_change() -> None:
     # Week before: 2 x 5 km = 10 km. Last week: 3 x 5 km = 15 km. Change = +50%.
     runs = make_runs(
         [
-            ("2019-01-02", 5, 30),
+            ("2019-01-01", 5, 30),  # the first run is on the first day of the week before
             ("2019-01-04", 5, 30),
             ("2019-01-09", 5, 30),
             ("2019-01-11", 5, 30),
@@ -73,6 +74,16 @@ def test_weekly_volume_rest_week_counts_as_zero() -> None:
     result = weekly_volume(runs)
     assert [week["km"] for week in result["weekly_km"]] == [5.0, 0.0, 5.0]
     assert result["change_pct"] is None
+
+
+def test_weekly_volume_new_runner_has_no_change_from_a_partial_week() -> None:
+    # A new runner (like the real Strava check): the week before is 18-24 Sep, but the
+    # first run is on 22 Sep, so that week only partly counts. 5 -> 18 km is not "+260%".
+    runs = make_runs([("2026-09-22", 5, 26), ("2026-09-26", 3, 18), ("2026-10-01", 15, 90)])
+    result = weekly_volume(runs)
+    assert [week["km"] for week in result["weekly_km"]] == [5.0, 18.0]  # km values stay
+    assert result["change_pct"] is None
+    assert "first run was on 2026-09-22" in result["note"]
 
 
 def test_weekly_volume_keeps_only_last_n_weeks() -> None:
@@ -204,6 +215,15 @@ def test_longest_run_and_share_of_week() -> None:
     assert result["week_km"] == 20.0
     assert result["share_of_week_pct"] == 50.0
     assert result["pace"] == "5:30"
+    assert result["duration"] == "55:00"
+
+
+@pytest.mark.parametrize(
+    "minutes, text",
+    [(55.4, "55:24"), (9.5, "9:30"), (60, "1:00:00"), (125.5, "2:05:30")],
+)
+def test_format_duration(minutes: float, text: str) -> None:
+    assert format_duration(minutes) == text
 
 
 def test_longest_run_ignores_runs_before_the_window() -> None:

@@ -11,12 +11,16 @@ What we know about activities.csv (checked in other projects that read it):
 - "Elapsed Time" also appears twice. All times are in seconds.
 - The date text depends on the region, e.g. "Feb 17, 2022, 12:18:26 PM" or
   "19 Feb 2022, 10:14:12".
+- "Activity Date" is in UTC, not the runner's local time. Checked with a real export:
+  the file said 7:04 PM, and Strava showed 8:04 PM to a runner in UTC+1. We convert it
+  to the runner's time zone, so a run near midnight counts on the right day.
 
 The result has the same columns as get_athlete_runs() (date, distance_km, duration_min,
 pace_min_km), so the charts, tools and agents work with it without any change.
 """
 
 from typing import IO
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pandas as pd
 
@@ -97,6 +101,30 @@ def _keep_runs(activities: pd.DataFrame, notes: list[str]) -> pd.DataFrame:
     return activities[is_run]
 
 
+def _local_dates(date_text: pd.Series, timezone: str, notes: list[str]) -> pd.Series:
+    """Read the "Activity Date" text (in UTC) and convert it to the runner's local time."""
+    # format="mixed": each region writes the date differently (see the top of the file).
+    dates = pd.to_datetime(date_text, format="mixed", errors="coerce")
+    try:
+        ZoneInfo(timezone)  # only to check that the name is a real time zone
+    except (ZoneInfoNotFoundError, ValueError):
+        notes.append(f"Unknown time zone {timezone!r}, so dates are kept in UTC.")
+        timezone = "UTC"
+    if timezone == "UTC":
+        notes.append(
+            "Date: Strava writes 'Activity Date' in UTC, and we used it as it is. A run near "
+            "midnight can count on the day before or after your local date."
+        )
+        return dates
+    notes.append(
+        f"Date: Strava writes 'Activity Date' in UTC; we converted it to your time zone "
+        f"({timezone}), so each run counts on your local date."
+    )
+    # tz_localize("UTC"): "these times are UTC". tz_convert: change to local time.
+    # tz_localize(None): drop the time zone again, like every other date in the project.
+    return dates.dt.tz_localize("UTC").dt.tz_convert(timezone).dt.tz_localize(None)
+
+
 def _distance_km(activities: pd.DataFrame, column: str, notes: list[str]) -> pd.Series:
     """Return the distance in km, and note which unit we assumed."""
     distance = pd.to_numeric(activities[column], errors="coerce")
@@ -138,8 +166,11 @@ def _duration_min(activities: pd.DataFrame, notes: list[str]) -> pd.Series:
     return seconds / 60
 
 
-def load_strava_csv(file: str | IO) -> tuple[pd.DataFrame, list[str]]:
+def load_strava_csv(file: str | IO, timezone: str = "UTC") -> tuple[pd.DataFrame, list[str]]:
     """Read a Strava activities.csv. Return (runs, notes).
+
+    timezone: the runner's time zone, for example "Europe/London" (the app uses the
+    browser's). The dates in the file are UTC and are converted to it.
 
     runs: one row per day with running, with the columns in RUN_COLUMNS, sorted by date.
     notes: short sentences that explain every assumption, for the app to show.
@@ -155,15 +186,10 @@ def load_strava_csv(file: str | IO) -> tuple[pd.DataFrame, list[str]]:
 
     table = pd.DataFrame(
         {
-            # format="mixed": each region writes the date differently (see the top of the file).
-            "datetime": pd.to_datetime(runs[DATE_COLUMN], format="mixed", errors="coerce"),
+            "datetime": _local_dates(runs[DATE_COLUMN], timezone, notes),
             "distance": _distance_km(runs, distance_column, notes),
             "duration": _duration_min(runs, notes),
         }
-    )
-    notes.append(
-        "Date: 'Activity Date' as written in the file. Strava may write it in UTC, not your "
-        "local time, so a run near midnight can count on the day before or after."
     )
     unreadable = int(table.isna().any(axis=1).sum())
     if unreadable:

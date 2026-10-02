@@ -23,8 +23,14 @@ def _read_processed(path: Path) -> pd.DataFrame:
 
 
 def load_sample() -> pd.DataFrame:
-    """Return every clean run of the sample athletes (one row per athlete per day)."""
-    return _read_processed(SAMPLE_FILE)
+    """Return every clean run of the sample athletes (one row per athlete per day).
+
+    The file doesn't store pace (to keep it small), so we add it here with the same
+    formula as clean_runs(): minutes / km.
+    """
+    sample = _read_processed(SAMPLE_FILE)
+    sample["pace"] = sample["duration"] / sample["distance"]
+    return sample
 
 
 def load_reference() -> pd.DataFrame:

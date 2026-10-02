@@ -33,6 +33,8 @@ def weekly_volume(runs: Runs, weeks: Weeks = 8) -> dict:
 
     Use it for questions about how much the runner runs: total or weekly distance, and
     whether their volume went up or down.
+    weeks must be at least 2 (it compares the last two weeks). For "this week" or
+    "last week", use weeks=2.
     """
     return metrics.weekly_volume(runs, weeks=weeks)
 
@@ -63,6 +65,8 @@ def load_ramp(runs: Runs) -> dict:
 
     Returns the ratio (last 7 days / usual week) and a label: low, normal or high risk.
     Use it for questions about increasing distance too fast or doing too much lately.
+    It needs 28 days of history, so for these questions ALSO call weekly_volume: then
+    there are numbers to talk about even for a new runner.
     """
     return metrics.load_ramp(runs)
 

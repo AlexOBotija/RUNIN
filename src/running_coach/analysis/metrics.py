@@ -43,6 +43,18 @@ def format_pace(pace_min_km: float) -> str:
     return f"{minutes}:{seconds:02d}"
 
 
+def format_duration(minutes: float) -> str:
+    """Turn a duration in decimal minutes into text: 55.4 -> "55:24", 125.5 -> "2:05:30".
+
+    The LLM gets this text instead of 55.4, which it once read as "55 minutes 4 seconds".
+    """
+    hours, seconds = divmod(round(minutes * 60), 3600)
+    minutes_part, seconds = divmod(seconds, 60)
+    if hours:
+        return f"{hours}:{minutes_part:02d}:{seconds:02d}"
+    return f"{minutes_part}:{seconds:02d}"
+
+
 def _not_enough_data(note: str) -> dict:
     """The answer every function gives when it can't calculate its result."""
     return {"status": "not_enough_data", "note": note}
@@ -112,7 +124,16 @@ def weekly_volume(
 
     last_km = float(table["distance_km"].iloc[-1])
     previous_km = float(table["distance_km"].iloc[-2])
-    if previous_km > 0:
+    first_run = runs["date"].min().normalize()
+    if table["week_start"].iloc[-2] < first_run:
+        # A new runner: the week before started before their first run, so it covers only
+        # a few days of running. Comparing it with a full week would give a misleading %.
+        change_pct = None
+        note = (
+            "Weeks are 7-day blocks, oldest first. The week before only partly counts: the "
+            f"first run was on {_to_text(first_run)}, so there is no % change."
+        )
+    elif previous_km > 0:
         change_pct = round((last_km - previous_km) / previous_km * 100, 1)
         note = "Weeks are 7-day blocks, oldest first."
     else:
@@ -284,7 +305,7 @@ def longest_run(
         "period": _period(table),
         "date": _to_text(run_day),
         "distance_km": round(float(longest["distance_km"]), 1),
-        "duration_min": round(float(longest["duration_min"]), 1),
+        "duration": format_duration(longest["duration_min"]),
         "pace": format_pace(longest["pace_min_km"]),
         "week_km": round(float(week["distance_km"]), 1),
         "share_of_week_pct": round(float(share_pct), 1),

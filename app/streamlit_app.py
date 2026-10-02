@@ -9,6 +9,7 @@ must survive a rerun are kept in st.session_state.
 """
 
 import io
+import os
 import random
 import time
 
@@ -27,7 +28,8 @@ from running_coach.analysis.metrics import (
 from running_coach.charts import pace_chart, weekly_distance_chart
 from running_coach.data.loaders import get_athlete_runs, load_reference, load_sample
 from running_coach.data.strava import StravaFormatError, load_strava_csv
-from running_coach.llm import RateLimitReached
+from running_coach.limits import DailyLimit
+from running_coach.llm import ModelBusy, RateLimitReached
 
 SAMPLE_SOURCE = "Sample runner"
 STRAVA_SOURCE = "Upload Strava export"
@@ -41,6 +43,27 @@ EXAMPLE_QUESTIONS = [
     "Am I increasing my distance too fast?",
     "How do I compare with runners at my level?",
 ]
+
+# Protect the free Gemini quota (500 requests per day; one question uses 2 to 4).
+MAX_QUESTIONS_PER_SESSION = 5  # each visitor (a page refresh starts a new session)
+MAX_QUESTIONS_PER_DAY = 60  # all visitors together: at most about 240 requests per day
+
+# Settings that Streamlit Cloud keeps in its Secrets box (secrets.toml locally, if any).
+SECRET_NAMES = ["GOOGLE_API_KEY", "GEMINI_MODEL"]
+
+
+def use_cloud_secrets() -> None:
+    """Copy the API settings from st.secrets into the environment, where llm.py reads them.
+
+    On Streamlit Cloud the settings are in st.secrets. On the laptop there is no
+    secrets.toml, so nothing is copied and llm.py reads .env as before. (load_dotenv()
+    never overwrites a variable that is already set, so the cloud values win.)
+    """
+    if not st.secrets.load_if_toml_exists():  # no secrets file: we are on the laptop
+        return
+    for name in SECRET_NAMES:
+        if name in st.secrets:
+            os.environ[name] = str(st.secrets[name])
 
 
 # ---------- Cached data (loaded once, then reused on every rerun) ----------
@@ -65,9 +88,9 @@ def cached_athlete_runs(athlete_id: int) -> pd.DataFrame:
 
 
 @st.cache_data
-def cached_strava_runs(file_bytes: bytes) -> tuple[pd.DataFrame, list[str]]:
-    """Read an uploaded activities.csv. The same file is only read once (the bytes are the key)."""
-    return load_strava_csv(io.BytesIO(file_bytes))
+def cached_strava_runs(file_bytes: bytes, timezone: str) -> tuple[pd.DataFrame, list[str]]:
+    """Read an uploaded activities.csv. The same file (and time zone) is only read once."""
+    return load_strava_csv(io.BytesIO(file_bytes), timezone)
 
 
 @st.cache_resource
@@ -78,6 +101,12 @@ def cached_crew() -> CompiledStateGraph:
     if the API key is missing.
     """
     return crew.build_crew()
+
+
+@st.cache_resource
+def cached_daily_limit() -> DailyLimit:
+    """ONE question counter shared by every visitor (cache_resource gives the same object)."""
+    return DailyLimit(MAX_QUESTIONS_PER_DAY)
 
 
 # ---------- Sidebar ----------
@@ -125,7 +154,9 @@ def strava_sidebar() -> tuple[pd.DataFrame, str]:
         )
         st.stop()
     try:
-        runs, notes = cached_strava_runs(uploaded.getvalue())
+        # Strava's dates are UTC: convert them to the visitor's browser time zone.
+        timezone = st.context.timezone or "UTC"
+        runs, notes = cached_strava_runs(uploaded.getvalue(), timezone)
     except StravaFormatError as error:
         st.warning(f"**We couldn't use this file.** {error}")
         st.stop()
@@ -219,6 +250,11 @@ def ask_crew(question: str, runs: pd.DataFrame) -> dict:
             "The free AI quota is used up for the moment. Please wait a minute and ask "
             "again. If it still doesn't work, today's limit is reached: try again tomorrow."
         )
+    except ModelBusy:
+        return error_message(
+            "The AI service is busy right now (too many people are using it). "
+            "Please try again in a minute."
+        )
     except GraphRecursionError:
         return error_message("The agents took too many steps. Please ask again.")
     except RuntimeError as error:  # for example GOOGLE_API_KEY is not set
@@ -266,14 +302,39 @@ def show_message(message: dict) -> None:
             show_agent_steps(message)
 
 
+def questions_left() -> int:
+    """How many questions this visitor can still ask in this session."""
+    return MAX_QUESTIONS_PER_SESSION - st.session_state.get("questions_asked", 0)
+
+
+def check_limits() -> dict | None:
+    """Return a friendly error message if the question is over a limit, otherwise None.
+
+    A question that passes is counted (for this visitor and for the whole app), and only
+    then goes to the crew. A question over the limit never calls the crew.
+    """
+    if questions_left() <= 0:
+        return error_message(
+            f"You have used your {MAX_QUESTIONS_PER_SESSION} questions for this visit. "
+            "This demo runs on a free AI quota, so each visitor gets a few questions. "
+            "Thanks for trying the coach team! You can still explore the charts and other runners."
+        )
+    if not cached_daily_limit().try_use():
+        return error_message(
+            "The coach team has answered all its questions for today (the app runs on a free "
+            "AI quota). Please come back tomorrow. The charts still work."
+        )
+    st.session_state.questions_asked = st.session_state.get("questions_asked", 0) + 1
+    return None
+
+
 def chat_section(runs: pd.DataFrame, runner_label: str) -> None:
     """Example buttons, the chat history, and a new question if there is one."""
     st.divider()
     st.subheader("Ask the coach team")
-    st.caption(
-        "Each question is answered on its own: the agents don't remember earlier questions. "
-        "One question uses 2 to 4 AI calls."
-    )
+    # An empty placeholder: we fill it at the end, when we know if a question was just
+    # counted, so "questions left" is never one behind.
+    limit_note = st.empty()
 
     # The history is kept in session_state so it survives reruns. Old answers were about
     # another runner, so a new runner starts a new chat.
@@ -299,10 +360,18 @@ def chat_section(runs: pd.DataFrame, runner_label: str) -> None:
         user_message = {"role": "user", "content": question}
         st.session_state.messages.append(user_message)
         show_message(user_message)
-        with st.spinner("The agents are working on it… (usually 3–5 s)"):
-            answer = ask_crew(question, runs)
+        answer = check_limits()
+        if answer is None:  # within the limits: ask the crew
+            with st.spinner("The agents are working on it… (usually 3–5 s)"):
+                answer = ask_crew(question, runs)
         st.session_state.messages.append(answer)
         show_message(answer)
+
+    limit_note.caption(
+        "Each question is answered on its own: the agents don't remember earlier questions. "
+        f"One question uses 2 to 4 AI calls. Questions left in this visit: "
+        f"{max(questions_left(), 0)} of {MAX_QUESTIONS_PER_SESSION}."
+    )
 
 
 def main() -> None:
@@ -312,6 +381,7 @@ def main() -> None:
         "Ask questions about a runner's training. A team of AI agents answers, "
         "using numbers calculated from the real runs."
     )
+    use_cloud_secrets()
 
     st.sidebar.header("Choose a runner")
     source = st.sidebar.radio("Data source", [SAMPLE_SOURCE, STRAVA_SOURCE])

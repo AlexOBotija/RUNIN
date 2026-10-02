@@ -14,3 +14,8 @@ plotly==7.1.0
 # Settings and testing
 python-dotenv==1.2.4
 pytest==9.1.1
+
+# Our own package (src/running_coach). Streamlit Cloud only runs
+# "pip install -r requirements.txt", so this line installs it there too.
+# -e = editable: code changes work without reinstalling (same as on the laptop).
+-e .
