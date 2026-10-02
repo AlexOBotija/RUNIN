@@ -113,4 +113,79 @@ The full 2019 file needs about 1.3 GB of RAM and about 3 minutes to process. Fre
 - The ratio label "high risk" is a guideline. The Coach must phrase it as "you increased quickly", never as a medical warning.
 - `get_athlete_runs` reads the sample file on every call. That's fine now; in Step 5 Streamlit will cache it.
 
-## Next: Step 3 — First single agent
+## Step 3 — First single agent ✅
+
+### What was done
+- `src/running_coach/agents/tools.py`: the 6 Step 2 functions wrapped as LangChain tools (`@tool`), listed in `ALL_TOOLS`. The docstrings are written for the LLM: what the tool returns and which questions it is for.
+- `src/running_coach/agents/single_agent.py`: `SYSTEM_PROMPT`, `AgentState` (`messages` + `runs`), `build_agent()` (the graph) and `ask(question, runs)`.
+- `src/running_coach/llm.py`: `call_with_retry()`, and `get_chat_model()` now turns off the library's own retries (`max_retries=1`).
+- `scripts/ask.py`: `python scripts/ask.py --athlete 30974 "Is my pace improving?"`. Prints the athlete, the tools called (with arguments), the number of LLM calls and the answer. `--verbose` also prints each tool result. Without `--athlete` it picks a random sample athlete.
+- Step 2 change: `weekly_volume` now also returns `total_km` (see the test results below).
+- New tests, none of them call the API (69 tests in total):
+  - `tests/test_tools.py` (16): each tool, run by a real `ToolNode` for athlete 30974, gives the same result as calling the metric function directly; the LLM's view of every tool has no `runs` argument; a bad `weeks` (0 or 53) goes back to the LLM as an error, not a crash. Skipped if the processed data files are missing.
+  - `tests/test_retry.py` (5): fake function and fake `sleep`. Succeeds on try 3 after waiting 10 s and 20 s, gives up after 3 tries, doesn't retry other errors, `max_retries == 1`.
+  - `tests/test_single_agent.py` (3): the whole graph with a fake chat model (scripted replies): agent → tools → agent → END; a question without tools ends after 1 LLM call; the step limit stops a model that never stops calling tools.
+
+### The graph
+```
+START -> agent --(did the LLM ask for tools?)-- yes -> tools -> back to agent
+                                               +-- no  -> END
+```
+- **agent** node: system prompt + conversation → Gemini (with the tool descriptions from `bind_tools`) → one reply.
+- **tools** node: LangGraph's `ToolNode`. Runs every tool the LLM asked for, injecting `runs` from the state.
+- **Conditional edge** after `agent`: tool calls in the reply → `tools`, otherwise → `END`.
+- Built by hand with `StateGraph` (not the prebuilt `create_agent`), so every piece is visible and Step 4 reuses the same pattern.
+
+### Decisions taken
+- **The runner's data comes from the state, never from the LLM.** The tools take `runs: Annotated[pd.DataFrame, InjectedState("runs")]`. LangGraph fills it from `state["runs"]` and hides it from the LLM. The LLM only chooses which tool to call and `weeks` (limited to 1–52 with a pydantic `Field`). It can't pick the wrong athlete or invent data.
+- **The state holds the runs DataFrame, not an athlete id.** The tools don't care where the runs come from, so the Strava data in Step 6 works with no change, and the sample file is read once per question, not once per tool.
+- **`compare_to_peers` loads the reference table itself** (7.5 KB, the same for every runner).
+- **The system prompt is added on every LLM call, not stored in the state**, so the state only holds the real conversation.
+- **Step limit: `recursion_limit=10`** (each node run is one step; a normal question takes 3). At most 5 LLM calls, then LangGraph stops with `GraphRecursionError` instead of using up the quota.
+- **`build_agent(model=None)`**: tests pass a fake model (dependency injection); the app uses Gemini.
+
+### System prompt rules
+1. Every number must come from a tool result. Never guess, estimate or calculate new numbers.
+2. `not_enough_data` → say the data is not enough and why (use the note).
+3. Questions the data can't answer (shoes, food, gear) → say so, give one short general tip with no numbers and no brand names, and list what it can answer.
+4. No medical advice, no diagnosis; pain or injury → see a doctor or physiotherapist. "High risk" = "you increased your distance quickly". Don't use "risk" for a normal or low load.
+5. The data ends on the runner's last run, not today; say which dates the numbers cover.
+6. Lower pace = faster; use the tool's "m:ss" text.
+7. Simple, friendly English, about 120 words at most.
+
+### LLM calls and free-tier limits
+- Free tier for `gemini-3.5-flash-lite`: **15 requests per minute, 500 per day**.
+- One question = **2 LLM calls** (1: choose tools, which can be several in one reply; 2: write the answer). A question that needs no tool = **1 call**. Maximum 5 (step limit).
+- So about **7 questions per minute** and **about 250 per day**. During development the per-minute limit is the one we are most likely to hit (many questions in a row).
+- Step 4 has 4 agents, so expect more calls per question there.
+- This step used 17 LLM calls in total.
+
+### Retry approach
+- The Gemini library retries rate-limit errors 6 times **silently** by default. With our retry around it, one call could become up to 18 hidden requests, so we set `max_retries=1` (1 attempt, no hidden retries).
+- `call_with_retry(func)`: up to 3 tries, waiting 10 s and then 20 s (the wait doubles: exponential backoff). Only `ModelRateLimitError` (HTTP 429) is retried; other errors (wrong key, a bug) are raised at once because they would fail again. After the last try: a clear `RuntimeError` (per-minute limit → wait a minute; daily limit → try tomorrow). It prints a line every time it waits.
+- The agent node calls `call_with_retry(lambda: model_with_tools.invoke(messages))`.
+
+### Results of the 5 test questions (athlete 30974)
+| Question | Tools called | LLM calls | Result |
+|---|---|---|---|
+| How much did I run in the last 4 weeks? | `weekly_volume(weeks=4)` | 2 | 378.6 km in total, 4 weekly values, average 94.6 km, −8.6%, dates 2019-12-04 to 2019-12-31 |
+| Is my pace improving? | `pace_trend()` (8 weeks) | 2 | "improving" with the 8 weekly paces as m:ss and the note that pace is a hint, not proof |
+| Am I running more than other people at my level? | `compare_to_peers()` | 2 | level 60+ km; weekly km and pace typical; runs per week above p75 |
+| Am I increasing my distance too fast? | `load_ramp()` | 2 | no: 96.7 km vs 94.6 km usual, ratio 1.02, normal |
+| What shoes should I buy? | none | 1 | can't answer from the data + one general tip (get fitted at a running shop), no numbers or brands |
+
+Every number in the final answers comes from a tool result. Also checked: a random athlete (6601, `consistency`) works.
+
+**Problems found in the first run, and fixed:**
+- Q1: Gemini added the 4 weeks itself: "378.5 km". That breaks rule 1, and it was even slightly wrong (it added the rounded weekly values; pandas gives 378.6). Fix: `weekly_volume` now returns `total_km`, so the natural "how much?" question has a tool number.
+- Q2: Gemini chose `weeks=4` for the pace trend, which is too noisy. Fix: the `pace_trend` docstring says to use at least 8 weeks unless the runner asks about a period.
+- Q4: "carries a normal risk". Fix: rule 4 says not to use "risk" for a normal or low load.
+
+Two of the three fixes were text (a docstring and the prompt), not logic: with agents, tool descriptions and prompts change behaviour, so we check them with real questions.
+
+### Things to remember
+- When the runner gives no period, Gemini often chooses `weeks=4` (e.g. for `consistency`). Fine for volume and consistency; for trends the docstring now asks for 8.
+- On Windows, if `ask.py` output is redirected to a file or pipe and fails on special characters, set `$env:PYTHONUTF8=1`.
+- For Step 4: reuse `ALL_TOOLS`, `call_with_retry` and the `runs`-in-state pattern; only the Data agent gets the tools. `ask.py` counts LLM calls by counting `AIMessage`s.
+
+## Next: Step 4 — Multi-agent system

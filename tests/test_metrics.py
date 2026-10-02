@@ -60,6 +60,7 @@ def test_weekly_volume_counts_km_and_change() -> None:
     result = weekly_volume(runs)
     assert result["status"] == "ok"
     assert [week["km"] for week in result["weekly_km"]] == [10.0, 15.0]
+    assert result["total_km"] == 25.0
     assert result["last_week_km"] == 15.0
     assert result["previous_week_km"] == 10.0
     assert result["change_pct"] == 50.0
@@ -79,6 +80,7 @@ def test_weekly_volume_keeps_only_last_n_weeks() -> None:
     result = weekly_volume(runs, weeks=2)
     assert result["period"]["weeks_analysed"] == 2
     assert [week["km"] for week in result["weekly_km"]] == [6.0, 7.0]
+    assert result["total_km"] == 13.0  # the 5 km of the older week is not counted
 
 
 def test_weekly_volume_single_week_is_not_enough() -> None:

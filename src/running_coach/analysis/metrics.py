@@ -103,7 +103,7 @@ def _period(table: pd.DataFrame) -> dict:
 def weekly_volume(
     runs: pd.DataFrame, weeks: int = 8, end_date: str | pd.Timestamp | None = None
 ) -> dict:
-    """Km per week for the last `weeks` weeks, and the % change between the last two."""
+    """Km per week for the last `weeks` weeks, their total, and the % change between the last two."""
     if runs.empty:
         return _not_enough_data("No runs found.")
     table = _weekly_table(runs, weeks, _resolve_end_date(runs, end_date))
@@ -126,6 +126,7 @@ def weekly_volume(
             {"week_start": _to_text(row.week_start), "km": round(float(row.distance_km), 1)}
             for row in table.itertuples()
         ],
+        "total_km": round(float(table["distance_km"].sum()), 1),
         "average_km_per_week": round(float(table["distance_km"].mean()), 1),
         "last_week_km": round(last_km, 1),
         "previous_week_km": round(previous_km, 1),
