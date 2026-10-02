@@ -28,6 +28,7 @@ PAUSE_SECONDS = 20
 
 
 def count_words(text: str) -> int:
+    """Count the words in an answer (words are separated by spaces or new lines)."""
     return len(text.split())
 
 
@@ -37,6 +38,7 @@ def count_next_week_lines(text: str) -> int:
 
 
 def main() -> None:
+    """Ask every question to both versions, print the answers, then the summary table."""
     parser = argparse.ArgumentParser(description="Compare the single agent and the crew.")
     parser.add_argument("--athlete", type=int, default=30974, help="Athlete id (default 30974)")
     args = parser.parse_args()

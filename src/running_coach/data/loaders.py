@@ -1,6 +1,9 @@
 """Read the small processed files that the app and the agents use.
 
-The files are built once by: python -m running_coach.data.prepare
+Both files are small and committed to Git, so the app works straight after a clone.
+To build them again from the raw data:
+    python -m running_coach.data.download
+    python -m running_coach.data.prepare
 """
 
 from pathlib import Path

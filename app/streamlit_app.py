@@ -375,6 +375,7 @@ def chat_section(runs: pd.DataFrame, runner_label: str) -> None:
 
 
 def main() -> None:
+    """Draw the whole page: sidebar, key numbers, charts and the chat."""
     st.set_page_config(page_title="Running Coach Crew", page_icon="🏃", layout="wide")
     st.title("🏃 Running Coach Crew")
     st.caption(
@@ -393,7 +394,8 @@ def main() -> None:
         reference = cached_reference()
     except FileNotFoundError:
         st.error(
-            "The data files are missing. Build them once with: "
+            "The data files are missing. Build them with "
+            "`python -m running_coach.data.download`, then "
             "`python -m running_coach.data.prepare`"
         )
         st.stop()

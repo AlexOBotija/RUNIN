@@ -3,6 +3,8 @@
 Settings come from the .env file in the project root:
 - GOOGLE_API_KEY: your Gemini API key.
 - GEMINI_MODEL: the model name, for example "gemini-3.5-flash-lite".
+On Streamlit Cloud there is no .env: the app copies both settings from st.secrets into
+environment variables first (use_cloud_secrets() in app/streamlit_app.py).
 
 Free-tier limits (see PROGRESS.md): 15 requests per minute and 500 per day. When we go
 over a limit, Gemini answers with a rate-limit error (HTTP 429). When Google's servers are

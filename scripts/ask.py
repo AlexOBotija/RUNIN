@@ -69,6 +69,7 @@ def print_single_report(messages: list[BaseMessage], seconds: float, verbose: bo
 
 
 def main() -> None:
+    """Read the command-line options, ask the question and print the report."""
     parser = argparse.ArgumentParser(description="Ask the running coach a question.")
     parser.add_argument("question", help='For example: "Is my pace improving?"')
     parser.add_argument("--athlete", type=int, help="Athlete id from the sample (default: random)")
@@ -90,7 +91,8 @@ def main() -> None:
             result = crew.ask(args.question, runs)
         seconds = time.perf_counter() - start
     except (ValueError, RuntimeError, GraphRecursionError) as error:
-        # ValueError: unknown athlete. RuntimeError: rate limit after all retries.
+        # ValueError: unknown athlete. RuntimeError: GOOGLE_API_KEY or GEMINI_MODEL not set,
+        # or Gemini still rate-limited or busy after all retries (RateLimitReached, ModelBusy).
         # GraphRecursionError: the graph hit LangGraph's step limit.
         sys.exit(f"Error: {error}")
 
